@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 110" fill="none">
+  <!-- Main dark navy "A" peak + right half -->
+  <polygon points="50,0 100,110 50,68" fill="#1B2A4A"/>
+  <!-- Left "leg" dark navy -->
+  <polygon points="50,0 50,68 10,110" fill="#1B2A4A"/>
+  <!-- Muted-blue accent triangle — bottom left -->
+  <polygon points="10,110 50,68 0,110" fill="#7B9EC4"/>
+</svg>
