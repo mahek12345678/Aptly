@@ -3,7 +3,12 @@
  * Injects the Authorization header when a token is present in localStorage.
  */
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string) || 'http://localhost:8000';
+const BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string) || 'http://localhost:8000').replace(/\/+$/, '');
+
+function formatUrl(path: string): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${BASE_URL}${cleanPath}`;
+}
 
 type RequestOptions = Omit<RequestInit, 'body'> & {
   body?: unknown;
@@ -27,7 +32,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   headers['Pragma'] = 'no-cache';
   headers['Expires'] = '0';
 
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetch(formatUrl(path), {
     cache: 'no-store',
     ...options,
     headers,
@@ -77,7 +82,7 @@ export const api = {
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
-    const response = await fetch(`${BASE_URL}${path}`, {
+    const response = await fetch(formatUrl(path), {
       cache: 'no-store',
       ...options,
       method: 'POST',
@@ -107,7 +112,7 @@ export const api = {
     // Add cache-busting timestamp parameter so browser HTTP cache NEVER serves stale file bytes
     const separator = path.includes('?') ? '&' : '?';
     const cacheBustedPath = `${path}${separator}_t=${Date.now()}`;
-    const response = await fetch(`${BASE_URL}${cacheBustedPath}`, {
+    const response = await fetch(formatUrl(cacheBustedPath), {
       cache: 'no-store',
       ...restOptions,
       method: 'GET',

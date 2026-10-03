@@ -76,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async (): Promise<UserProfile | null> => {
     try {
-      const profile = await api.get<UserProfile>('/api/auth/me');
+      const profile = await api.get<UserProfile>('/api/v1/auth/me');
       setUser(profile);
       localStorage.setItem(USER_KEY, JSON.stringify(profile));
       return profile;
@@ -99,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (googleCredential: string): Promise<UserProfile> => {
     setIsLoading(true);
     try {
-      const response = await api.post<TokenResponse>('/api/auth/google/login', {
+      const response = await api.post<TokenResponse>('/api/v1/auth/google/login', {
         credential: googleCredential,
       });
       setToken(response.access_token);
@@ -115,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signup = useCallback(async (googleCredential: string): Promise<UserProfile> => {
     setIsLoading(true);
     try {
-      const response = await api.post<TokenResponse>('/api/auth/google/signup', {
+      const response = await api.post<TokenResponse>('/api/v1/auth/google/signup', {
         credential: googleCredential,
       });
       setToken(response.access_token);
@@ -130,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateOnboardingProgress = useCallback(
     async (step?: number, completed?: boolean): Promise<UserProfile> => {
-      const updated = await api.put<UserProfile>('/api/onboarding/step', {
+      const updated = await api.put<UserProfile>('/api/v1/onboarding/step', {
         step,
         completed,
       });
@@ -143,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await api.post('/api/auth/logout');
+      await api.post('/api/v1/auth/logout');
     } catch {
       // Ignore — logout always clears local state
     } finally {
