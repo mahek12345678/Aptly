@@ -2,7 +2,9 @@ import logging
 from pathlib import Path
 from typing import List
 
-from pydantic import Field
+from urllib.parse import urlsplit
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -12,12 +14,24 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 _ENV_FILE = str(_BACKEND_DIR / ".env")
 
 
+def sanitize_origin(url: str) -> str:
+    """Normalize a URL to its scheme://netloc origin without trailing paths or slashes."""
+    if not url:
+        return ""
+    url = url.strip()
+    split = urlsplit(url)
+    if split.scheme and split.netloc:
+        return f"{split.scheme}://{split.netloc}"
+    return url.rstrip("/")
+
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Aptly"
     API_V1_STR: str = "/api"
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: List[str] = [
         "http://localhost:5173",
+        "https://aptly-seven.vercel.app",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
     ]
@@ -43,6 +57,34 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
     FRONTEND_URL: str = "http://localhost:5173"
+
+    @field_validator("FRONTEND_URL", mode="after")
+    @classmethod
+    def sanitize_frontend_url(cls, v: str) -> str:
+        if not v:
+            return "http://localhost:5173"
+        return sanitize_origin(v)
+
+    @property
+    def cors_allowed_origins(self) -> List[str]:
+        raw_candidates = [
+            "http://localhost:5173",
+            "https://aptly-seven.vercel.app",
+            self.FRONTEND_URL,
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+        ]
+        if self.CORS_ORIGINS:
+            raw_candidates.extend(self.CORS_ORIGINS)
+
+        origins: List[str] = []
+        for candidate in raw_candidates:
+            if not candidate:
+                continue
+            origin = sanitize_origin(str(candidate))
+            if origin and origin not in origins:
+                origins.append(origin)
+        return origins
 
     # Resume Storage
     RESUME_UPLOAD_DIR: Path = _BACKEND_DIR / "uploads" / "resumes"

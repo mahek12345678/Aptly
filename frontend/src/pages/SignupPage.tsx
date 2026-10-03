@@ -92,6 +92,8 @@ export default function SignupPage() {
   const { signup, user, isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
 
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+
   // If already authenticated, redirect to appropriate target route
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -269,6 +271,12 @@ export default function SignupPage() {
               {/* Pixel-matched Google Button Surface */}
               <button
                 type="button"
+                onClick={() => {
+                  if (!googleClientId) {
+                    console.error("VITE_GOOGLE_CLIENT_ID is missing");
+                    setGoogleError("Google Sign-Up is temporarily unavailable (OAuth configuration missing).");
+                  }
+                }}
                 className="w-full h-[42px] rounded-lg bg-[#2B5FA8] hover:bg-[#255294] active:bg-[#1E437C] text-white flex items-center justify-center gap-2.5 transition-colors shadow-none font-medium text-[13.5px] select-none"
               >
                 <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center shrink-0 p-0.5">
@@ -283,17 +291,19 @@ export default function SignupPage() {
               </button>
 
               {/* Functional Invisible GoogleLogin Overlay */}
-              <div className="absolute inset-0 opacity-0 overflow-hidden cursor-pointer">
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={handleGoogleError}
-                  useOneTap={false}
-                  shape="rectangular"
-                  size="large"
-                  text="signup_with"
-                  width="370"
-                />
-              </div>
+              {googleClientId ? (
+                <div className="absolute inset-0 opacity-0 overflow-hidden cursor-pointer">
+                  <GoogleLogin
+                    onSuccess={handleGoogleSuccess}
+                    onError={handleGoogleError}
+                    useOneTap={false}
+                    shape="rectangular"
+                    size="large"
+                    text="signup_with"
+                    width="370"
+                  />
+                </div>
+              ) : null}
             </div>
 
             {/* Already have an account link */}
