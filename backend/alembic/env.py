@@ -64,17 +64,28 @@ async def run_async_migrations() -> None:
     """In this scenario we need to create an Engine
     and associate a connection with the context.
     """
+    connect_args = {}
+    if settings.async_database_url.startswith("postgresql+asyncpg://"):
+        is_local = "localhost" in settings.async_database_url or "127.0.0.1" in settings.async_database_url
+        if not is_local or settings.ENVIRONMENT == "production":
+            connect_args["ssl"] = "require"
+
     try:
         connectable = async_engine_from_config(
             config.get_section(config.config_ini_section, {}),
             prefix="sqlalchemy.",
             poolclass=pool.NullPool,
+            connect_args=connect_args,
         )
         async with connectable.connect() as connection:
             await connection.run_sync(do_run_migrations)
         await connectable.dispose()
     except Exception as exc:
-        print(f"Could not connect to {settings.async_database_url} ({exc}). Running migrations on local SQLite database (aptly.db)...")
+        err_msg = f"{type(exc).__name__}: {exc}"
+        if settings.ENVIRONMENT == "production":
+            print(f"PostgreSQL connection failed during migrations: {err_msg}")
+            raise
+        print(f"Could not connect to configured database ({err_msg}). Running migrations on local SQLite database (aptly.db)...")
         sqlite_section = {"sqlalchemy.url": "sqlite+aiosqlite:///./aptly.db"}
         connectable = async_engine_from_config(
             sqlite_section,
