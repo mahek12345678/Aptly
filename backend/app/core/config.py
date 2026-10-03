@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     CHROMA_PERSIST_DIR: Path = _BACKEND_DIR / "chroma_data"
     CHROMA_COLLECTION_NAME: str = "aptly_resumes"
     EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
+    EMBEDDING_PROVIDER: str = "local"  # "local" (SentenceTransformer CPU), "onnx" (Chroma ONNX MiniLM), or "remote"
+    REMOTE_EMBEDDING_URL: str = ""
+    REMOTE_EMBEDDING_API_KEY: str = ""
 
     # LLM Service Configuration (Groq)
     GROQ_API_KEY: str = ""

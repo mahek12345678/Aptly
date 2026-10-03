@@ -10,59 +10,154 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import uuid
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
-from sentence_transformers import SentenceTransformer
-
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
-    """Singleton wrapper for SentenceTransformer embedding model."""
+    """Lazy-loaded embedding service supporting local CPU SentenceTransformer, ONNX, and remote providers."""
 
-    _instance: Optional[SentenceTransformer] = None
+    _instance: Any = None
+    _provider: Optional[str] = None
 
     @classmethod
-    def get_model(cls) -> SentenceTransformer:
-        if cls._instance is None:
-            logger.info("Loading SentenceTransformer model: %s", settings.EMBEDDING_MODEL_NAME)
-            cls._instance = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
-            logger.info("SentenceTransformer model loaded successfully.")
+    def get_model(cls) -> Any:
+        provider = (getattr(settings, "EMBEDDING_PROVIDER", "local") or "local").lower()
+        if cls._instance is None or cls._provider != provider:
+            cls._provider = provider
+            if provider == "local":
+                import os
+
+                # Force CPU-only execution and limit thread overhead in memory-constrained environments
+                os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+                os.environ.setdefault("OMP_NUM_THREADS", "1")
+                os.environ.setdefault("MKL_NUM_THREADS", "1")
+                try:
+                    import torch
+
+                    torch.set_num_threads(1)
+                except ImportError:
+                    pass
+
+                from sentence_transformers import SentenceTransformer
+
+                logger.info(
+                    "Loading SentenceTransformer model (CPU-only): %s",
+                    settings.EMBEDDING_MODEL_NAME,
+                )
+                cls._instance = SentenceTransformer(settings.EMBEDDING_MODEL_NAME, device="cpu")
+                logger.info("SentenceTransformer CPU model loaded successfully.")
+
+            elif provider == "onnx":
+                # Ultra-lightweight ONNX runtime (~65MB RSS) using Chroma's built-in all-MiniLM-L6-v2
+                from chromadb.utils import embedding_functions
+
+                logger.info("Loading Chroma DefaultEmbeddingFunction (ONNX all-MiniLM-L6-v2)")
+                cls._instance = embedding_functions.DefaultEmbeddingFunction()
+                logger.info("ONNX embedding function loaded successfully.")
+
+            elif provider == "remote":
+                logger.info("Configured remote embedding provider (URL: %s)", settings.REMOTE_EMBEDDING_URL)
+                cls._instance = "remote"
+
+            else:
+                logger.warning("Unknown EMBEDDING_PROVIDER '%s', falling back to local CPU", provider)
+                from sentence_transformers import SentenceTransformer
+
+                cls._instance = SentenceTransformer(settings.EMBEDDING_MODEL_NAME, device="cpu")
+
         return cls._instance
 
     @classmethod
     def generate_embeddings(cls, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+
+        provider = (getattr(settings, "EMBEDDING_PROVIDER", "local") or "local").lower()
         model = cls.get_model()
-        embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-        return embeddings.tolist()
+
+        if provider == "local" or hasattr(model, "encode"):
+            embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+            return embeddings.tolist()
+
+        elif provider == "onnx":
+            result = model(texts)
+            return [list(vec) for vec in result]
+
+        elif provider == "remote":
+            return cls._generate_remote_embeddings(texts)
+
+        if hasattr(model, "encode"):
+            return model.encode(texts, convert_to_numpy=True, show_progress_bar=False).tolist()
+        return []
+
+    @classmethod
+    def _generate_remote_embeddings(cls, texts: list[str]) -> list[list[float]]:
+        import requests
+
+        url = settings.REMOTE_EMBEDDING_URL
+        api_key = settings.REMOTE_EMBEDDING_API_KEY
+        if not url:
+            raise ValueError("REMOTE_EMBEDDING_URL must be configured when EMBEDDING_PROVIDER=remote")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        resp = requests.post(
+            url,
+            json={"input": texts, "model": settings.EMBEDDING_MODEL_NAME},
+            headers=headers,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if "data" in data and isinstance(data["data"], list):
+            return [item["embedding"] for item in data["data"]]
+        raise ValueError("Unexpected remote embedding API response format")
 
 
 class VectorStoreService:
-    """ChromaDB vector store for chunked resume storage and querying."""
+    """ChromaDB vector store for chunked resume storage and querying with lazy initialization."""
 
     def __init__(self, persist_dir: Optional[Path] = None, collection_name: Optional[str] = None):
         self.persist_dir = Path(persist_dir or settings.CHROMA_PERSIST_DIR)
-        self.persist_dir.mkdir(parents=True, exist_ok=True)
         self.collection_name = collection_name or settings.CHROMA_COLLECTION_NAME
-
-        # Initialize persistent ChromaDB client
-        self.client = chromadb.PersistentClient(
-            path=str(self.persist_dir),
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
         self.jobs_collection_name = "aptly_jobs"
-        self.jobs_collection = self.client.get_or_create_collection(
-            name=self.jobs_collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        self._client = None
+        self._collection = None
+        self._jobs_collection = None
+
+    @property
+    def client(self):
+        """Lazy-initialize persistent ChromaDB client only on first access."""
+        if self._client is None:
+            import chromadb
+            from chromadb.config import Settings as ChromaSettings
+
+            self.persist_dir.mkdir(parents=True, exist_ok=True)
+            self._client = chromadb.PersistentClient(
+                path=str(self.persist_dir),
+                settings=ChromaSettings(anonymized_telemetry=False),
+            )
+        return self._client
+
+    @property
+    def collection(self):
+        """Lazy-load the resume vector collection only on first access."""
+        if self._collection is None:
+            self._collection = self.client.get_or_create_collection(
+                name=self.collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+        return self._collection
+
+    @property
+    def jobs_collection(self):
+        """Lazy-load the jobs vector collection only on first access."""
+        if self._jobs_collection is None:
+            self._jobs_collection = self.client.get_or_create_collection(
+                name=self.jobs_collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+        return self._jobs_collection
 
     def store_job_embedding(
         self,

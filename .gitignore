@@ -48,6 +48,7 @@ lerna-debug.log*
 # Vector DB / Local storage
 chroma_data/
 uploads/
+*.db
 
 # OS / IDE
 .DS_Store
